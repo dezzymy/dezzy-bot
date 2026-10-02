@@ -14,7 +14,7 @@ from __future__ import annotations
 from metaculus_bot.constants import MANTIC_HOST, METACULUS_HOST
 
 SEARCH_NEWS_DESCRIPTION = (
-    "Search recent and historical NEWS coverage (AskNews). Use for: events,\n"
+    "Search recent and historical NEWS coverage (Nimbleway). Use for: events,\n"
     "announcements, things that happened, ongoing-situation updates. Query with a\n"
     "short natural-language phrase, not keywords. Returns a digest of matching\n"
     "articles with dates and URLs. Use search_web instead for: reports, datasets,\n"
@@ -24,7 +24,7 @@ SEARCH_NEWS_DESCRIPTION = (
 )
 
 SEARCH_WEB_DESCRIPTION = (
-    "Semantic web search (Exa). Use for: official documents, datasets, reports,\n"
+    "Web search (Tavily). Use for: official documents, datasets, reports,\n"
     "organizational pages, technical/niche facts, finding a primary source you\n"
     "believe exists. Returns results with URLs and relevant excerpts. Follow up\n"
     "promising results with fetch(url) — excerpts are often not enough to verify\n"

@@ -96,6 +96,8 @@ class TestPredicates:
         assert should_route_via_donated_key("openrouter/google/gemini-3.1-flash-lite") is True
         assert should_route_via_donated_key("openrouter/google/gemini-3-flash-preview") is True
         assert should_route_via_donated_key("openrouter/google/gemini-3.1-pro-preview") is False
+        assert should_route_via_donated_key("openrouter/google/gemma-4-31b-it:free") is False
+        assert should_route_via_donated_key("openrouter/nvidia/nemotron-3-super-120b-a12b:free") is False
         # Explicit toggle off: ALL Google calls go through the operator's personal key only.
         monkeypatch.setenv("GEMINI_USE_DONATED_OPENROUTER_KEY", "false")
         assert should_route_via_donated_key("openrouter/google/gemini-3.1-pro-preview") is False

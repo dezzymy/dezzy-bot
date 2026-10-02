@@ -33,6 +33,8 @@ PROVIDER_SECTION_HEADERS: dict[str, str] = {
     "exa": "## Web Research (Exa)",
     "perplexity": "## Web Research (Perplexity)",
     "openrouter": "## Web Research (OpenRouter)",
+    "nimbleway": "## Web Research (Nimbleway)",
+    "tavily": "## Web Research (Tavily)",
     "custom": "## Research (Custom)",
 }
 

@@ -292,21 +292,9 @@ def test_tool_schemas_round_trip_for_public_tools() -> None:
 
 @pytest.mark.asyncio
 async def test_search_web_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("EXA_API_KEY", "key")
-    monkeypatch.setattr(
-        agentic_tools,
-        "_call_exa_search",
-        AsyncMock(
-            return_value=[
-                SimpleNamespace(
-                    title="Result title",
-                    url="https://example.com/a",
-                    published_date="2026-07-15",
-                    highlights=["First highlight", "Second highlight"],
-                )
-            ]
-        ),
-    )
+    monkeypatch.setenv("TAVILY_API_KEY", "key")
+    search = AsyncMock(return_value=[{"title": "Result title", "url": "https://example.com/a", "content": "Evidence."}])
+    monkeypatch.setattr(agentic_tools, "tavily_search", search)
 
     outcome = await agentic_tools.search_web("query")
 
@@ -314,7 +302,8 @@ async def test_search_web_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert outcome.method == "search"
     assert "Result title" in outcome.content_markdown
     assert "https://example.com/a" in outcome.content_markdown
-    assert "- First highlight" in outcome.content_markdown
+    assert "Evidence." in outcome.content_markdown
+    search.assert_awaited_once_with("query", end_date=None)
 
 
 class _FakeHttpxAsyncClient:
@@ -356,135 +345,63 @@ def _patch_async_exa(monkeypatch: pytest.MonkeyPatch, searcher: MagicMock) -> li
 
 
 @pytest.mark.asyncio
-async def test_search_web_retries_then_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("EXA_API_KEY", "key")
-    searcher = MagicMock(
-        side_effect=[
-            RuntimeError("429 too many requests"),
-            RuntimeError("rate limit"),
-            SimpleNamespace(results=[SimpleNamespace(title="Recovered", url="https://example.com", highlights=[])]),
-        ]
-    )
-    sleeps: list[float] = []
-
-    monkeypatch.setattr("asyncio.sleep", AsyncMock(side_effect=sleeps.append))
-    _patch_async_exa(monkeypatch, searcher)
-
-    outcome = await agentic_tools.search_web("query")
-
-    assert outcome.status == "ok"
-    assert "Recovered" in outcome.content_markdown
-    assert sleeps == [1.0, 4.0]
-    assert searcher.call_count == 3
-
-
-@pytest.mark.asyncio
-async def test_search_web_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("EXA_API_KEY", "key")
-    searcher = MagicMock(side_effect=RuntimeError("429 too many requests"))
-
-    monkeypatch.setattr("asyncio.sleep", AsyncMock())
-    _patch_async_exa(monkeypatch, searcher)
+async def test_search_web_provider_failure_is_a_soft_tool_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TAVILY_API_KEY", "key")
+    search = AsyncMock(side_effect=RuntimeError("provider unavailable"))
+    monkeypatch.setattr(agentic_tools, "tavily_search", search)
 
     outcome = await agentic_tools.search_web("query")
 
     assert outcome.status == "error"
-    assert "Exa search failed" in outcome.content_markdown
-    assert searcher.call_count == 3
+    assert "Tavily search failed" in outcome.content_markdown
+    search.assert_awaited_once_with("query", end_date=None)
 
 
 @pytest.mark.asyncio
-async def test_search_web_exa_client_uses_bounded_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fix 2 (Exa half): the async Exa client is built with a client-side
-    timeout <= the search_web tool budget, so a hung endpoint tears the socket
-    down before the loop's wait_for fires — and there is no worker thread to
-    leak because the sync/to_thread path is gone."""
-    monkeypatch.setenv("EXA_API_KEY", "key")
-    searcher = MagicMock(return_value=SimpleNamespace(results=[]))
-    captured = _patch_async_exa(monkeypatch, searcher)
+async def test_search_web_has_bounded_http_timeout() -> None:
+    from metaculus_bot.constants import WEB_SEARCH_TIMEOUT_S
 
-    outcome = await agentic_tools.search_web("query")
-
-    assert outcome.status == "ok"
     tool_budget = next(
         tool.timeout_s for tool in agentic_tools.build_gap_fill_tools("topic") if tool.name == "search_web"
     )
-    assert len(captured) == 1
-    assert "timeout" in captured[0]
-    assert captured[0]["timeout"] is not None
-    assert captured[0]["timeout"] <= tool_budget
+
+    assert WEB_SEARCH_TIMEOUT_S <= tool_budget
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
 async def test_search_web_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
     outcome = await agentic_tools.search_web("query")
 
     assert outcome.status == "error"
-    assert "EXA_API_KEY" in outcome.content_markdown
+    assert "TAVILY_API_KEY" in outcome.content_markdown
 
 
 @pytest.mark.asyncio
 async def test_search_web_passes_end_published_date(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("EXA_API_KEY", "key")
-    searcher = MagicMock(return_value=SimpleNamespace(results=[]))
-    _patch_async_exa(monkeypatch, searcher)
+    monkeypatch.setenv("TAVILY_API_KEY", "key")
+    search = AsyncMock(return_value=[])
+    monkeypatch.setattr(agentic_tools, "tavily_search", search)
 
     await agentic_tools.search_web("query", end_published_date="2026-01-01")
 
-    assert searcher.call_args.kwargs["end_published_date"] == "2026-01-01"
+    assert search.call_args.kwargs["end_date"] == "2026-01-01"
 
 
 @pytest.mark.asyncio
 async def test_search_news_happy_path_uses_gate_and_semaphore(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ASKNEWS_CLIENT_ID", "id")
-    monkeypatch.setenv("ASKNEWS_SECRET", "secret")
-    gate = AsyncMock()
-    semaphore_entered = False
-
-    class RecordingSemaphore:
-        async def __aenter__(self) -> None:
-            nonlocal semaphore_entered
-            semaphore_entered = True
-
-        async def __aexit__(self, exc_type, exc, tb) -> None:
-            return None
-
-    class FakeSdk:
-        async def __aenter__(self) -> FakeSdk:
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb) -> None:
-            return None
-
-        news = SimpleNamespace(
-            search_news=AsyncMock(
-                return_value=SimpleNamespace(
-                    as_dicts=[
-                        {
-                            "eng_title": "Article title",
-                            "pub_date": "2026-07-16",
-                            "source_id": "reuters",
-                            "article_url": "https://example.com/story",
-                            "summary": "Short summary.",
-                        }
-                    ]
-                )
-            )
-        )
-
-    monkeypatch.setattr("metaculus_bot.research.providers._ASKNEWS_GLOBAL_SEMAPHORE", RecordingSemaphore())
-    monkeypatch.setattr("metaculus_bot.research.providers._asknews_rate_gate", gate)
-    monkeypatch.setitem(sys.modules, "asknews_sdk", SimpleNamespace(AsyncAskNewsSDK=lambda **_: FakeSdk()))
+    monkeypatch.setenv("NIMBLEWAY_API_KEY", "key")
+    search = AsyncMock(return_value=[{"title": "Article title", "url": "https://example.com/story", "description": "Short summary."}])
+    monkeypatch.setattr(agentic_tools, "nimbleway_search", search)
 
     outcome = await agentic_tools.search_news("query")
 
     assert outcome.status == "ok"
     assert outcome.method == "news"
-    assert semaphore_entered is True
-    gate.assert_awaited_once()
     assert "Article title" in outcome.content_markdown
+    search.assert_awaited_once_with("query", focus="news")
 
 
 class _FakeAskNewsSdk:
@@ -523,7 +440,7 @@ async def test_asknews_search_retries_rate_limit_then_succeeds(monkeypatch: pyte
     )
     sleep_mock = _patch_asknews_env(monkeypatch, search_news)
 
-    articles = await agentic_tools._call_asknews_search("query")
+    articles = await tool_backends._call_asknews_search("query")
 
     assert len(articles) == 1
     assert search_news.await_count == 2
@@ -542,7 +459,7 @@ async def test_asknews_search_retries_concurrency_limit_then_succeeds(monkeypatc
     )
     sleep_mock = _patch_asknews_env(monkeypatch, search_news)
 
-    articles = await agentic_tools._call_asknews_search("query")
+    articles = await tool_backends._call_asknews_search("query")
 
     assert len(articles) == 1
     assert search_news.await_count == 2
@@ -555,7 +472,7 @@ async def test_asknews_search_non_retryable_error_raises_immediately(monkeypatch
     sleep_mock = _patch_asknews_env(monkeypatch, search_news)
 
     with pytest.raises(RuntimeError, match="invalid credentials"):
-        await agentic_tools._call_asknews_search("query")
+        await tool_backends._call_asknews_search("query")
 
     assert search_news.await_count == 1
     assert sleep_mock.await_count == 0
@@ -587,7 +504,7 @@ async def test_asknews_search_subscription_inactive_raises_on_first_attempt(
     sleep_mock = _patch_asknews_env(monkeypatch, search_news)
 
     with pytest.raises(_FakeAskNewsForbiddenError, match="403011"):
-        await agentic_tools._call_asknews_search("query")
+        await tool_backends._call_asknews_search("query")
 
     assert search_news.await_count == 1
     assert sleep_mock.await_count == 0
@@ -600,7 +517,7 @@ async def test_asknews_search_rate_limit_exhausts_retries_and_raises(monkeypatch
     sleep_mock = _patch_asknews_env(monkeypatch, search_news)
 
     with pytest.raises(RuntimeError, match="429"):
-        await agentic_tools._call_asknews_search("query")
+        await tool_backends._call_asknews_search("query")
 
     assert search_news.await_count == tries
     assert sleep_mock.await_count == tries - 1
@@ -608,13 +525,12 @@ async def test_asknews_search_rate_limit_exhausts_retries_and_raises(monkeypatch
 
 @pytest.mark.asyncio
 async def test_search_news_missing_creds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ASKNEWS_CLIENT_ID", raising=False)
-    monkeypatch.delenv("ASKNEWS_SECRET", raising=False)
+    monkeypatch.delenv("NIMBLEWAY_API_KEY", raising=False)
 
     outcome = await agentic_tools.search_news("query")
 
     assert outcome.status == "error"
-    assert "ASKNEWS_CLIENT_ID" in outcome.content_markdown
+    assert "NIMBLEWAY_API_KEY" in outcome.content_markdown
 
 
 @pytest.mark.asyncio

@@ -200,24 +200,27 @@ There is always exactly one primary provider, chosen by
 `choose_provider_with_name` (`research/providers.py`). It walks a fixed
 priority order and returns the first provider whose credentials are present:
 
-1. **AskNews** if `ASKNEWS_CLIENT_ID` and `ASKNEWS_SECRET` are set. This is the
-   production case.
-2. **Exa.ai** (`SmartSearcher`) if `EXA_API_KEY` is set: a generic rundown
+1. **Nimbleway** if `NIMBLEWAY_API_KEY` is set. Production workflows force this
+   provider through `RESEARCH_PROVIDER=nimbleway`.
+2. **Tavily** if `TAVILY_API_KEY` is set: a web-search fallback and the
+   production parallel add-on (`TAVILY_ENABLED=true`).
+3. **AskNews** if `ASKNEWS_CLIENT_ID` and `ASKNEWS_SECRET` are set.
+4. **Exa.ai** (`SmartSearcher`) if `EXA_API_KEY` is set: a generic rundown
    (`_exa_provider`, `research/providers.py`).
-3. **Perplexity direct** if `PERPLEXITY_API_KEY` is set. Model:
+5. **Perplexity direct** if `PERPLEXITY_API_KEY` is set. Model:
    `PERPLEXITY_RESEARCH_MODEL` (`constants.py`); the function is
    `_perplexity_provider` (`research/providers.py`), and its prompt explicitly
    asks for prediction-market consideration unless the run is benchmarking.
-4. **Perplexity via OpenRouter** if `OPENROUTER_API_KEY` is set. Same function
+6. **Perplexity via OpenRouter** if `OPENROUTER_API_KEY` is set. Same function
    called with `use_open_router=True`, same model, prefixed for the OpenRouter
    route: `PERPLEXITY_RESEARCH_MODEL_VIA_OPENROUTER`.
-5. **Empty stub** if none of the above: research is just the add-on providers.
+7. **Empty stub** if none of the above: research is just the add-on providers.
 
-In production the AskNews credentials are present, so Exa and the two Perplexity
-routes never run as the primary. They are fallbacks, not peers. To force a
+In production Nimbleway is forced as primary and Tavily runs as a parallel add-on;
+the legacy providers remain available when explicitly selected/configured. To force a
 specific primary regardless of credentials, set `RESEARCH_PROVIDER=<name>`
-(`asknews` / `exa` / `perplexity` / `openrouter`); any other value behaves as
-auto. Forcing `asknews` without the AskNews creds fails loudly rather than
+(`nimbleway` / `tavily` / `asknews` / `exa` / `perplexity` / `openrouter`); any other value behaves as
+auto. Forcing Nimbleway or Tavily without its API key fails loudly rather than
 silently picking a different provider.
 
 Exa and Perplexity client construction and invocation live in
@@ -2310,6 +2313,8 @@ resolution-source rung counts. **A zero renders nothing**, so every healthy prov
 `## Provider Diagnostics` line stays byte-identical to what it was before the map
 existed, while `asdict` keeps the zero in the schema-v2 archive, which is exactly what
 makes "the check ran and found none" distinguishable from "the check never ran".
+Nimbleway and Tavily also store a short human-readable `details["explanation"]` in the
+provider result archive; it is not appended to forecaster-facing research text.
 
 When a research sink is wired, each question's research is written for backtest
 replay by `ResearchPersistenceWriter` (`research/persistence.py`, at
@@ -2330,8 +2335,10 @@ All six bot workflows
 
 | Flag | Provider |
 |---|---|
-| `NATIVE_SEARCH_ENABLED` | OpenAI native search |
-| `GEMINI_SEARCH_ENABLED` | Gemini grounded search |
+| `RESEARCH_PROVIDER` | Nimbleway primary |
+| `TAVILY_ENABLED` | Tavily parallel web search |
+| `NATIVE_SEARCH_ENABLED` | Legacy OpenAI native search (off) |
+| `GEMINI_SEARCH_ENABLED` | Legacy Gemini grounded search (off) |
 | `FINANCIAL_DATA_ENABLED` | yfinance + FRED |
 | `PREDICTION_MARKETS_ENABLED` | prediction-market snapshot |
 | `RESOLUTION_SOURCE_ENABLED` | resolution-source fetcher |
@@ -2339,16 +2346,16 @@ All six bot workflows
 | `GAP_FILL_ENABLED` | v1 targeted gap-fill |
 | `GAP_FILL_V2_ENABLED` | v2 agentic gap-fill |
 
-So in production the active research stack is: AskNews (primary, summarized) +
-OpenAI native search + Gemini grounded search + financial data (when classified
-financial) + prediction-market snapshot + Tier-1 resolution-source fetcher +
-time-series
-anchor + both gap-fill passes. Env flags, models, and timeouts live in
+So in production the active research stack is: Nimbleway (primary) + Tavily +
+financial data (when classified financial) + prediction-market snapshot + Tier-1
+resolution-source fetcher + time-series anchor + both gap-fill passes. Forecast,
+analysis, and gap-fill OpenRouter roles use the catalog-listed free NVIDIA, Qwen,
+and Gemma routes verified 2026-10-02. Env flags, models, and timeouts live in
 `metaculus_bot/constants.py`; provider models route through the shared
-donated-then-personal OpenRouter fallback (`fallback_openrouter.py`), except
-Gemini grounded search, which uses the personal Google key directly. The Mantic workflow
-pins `DONATED_OPENROUTER_KEY_ENABLED` to false, so there every OpenRouter call is on the
-personal key (`docs/operations.md` "Mantic").
+OpenRouter builder (`fallback_openrouter.py`); `:free` models bypass the donated key
+and use the personal OpenRouter key. Google URL-context reading remains a separate
+optional paid rung. The Mantic workflow also pins `DONATED_OPENROUTER_KEY_ENABLED` to
+false (`docs/operations.md` "Mantic").
 
 All of that is subject to the question's close-derived time budget: a question on the
 fast path runs the primary plus the cheap hard-capped providers only, with the slow
@@ -2361,8 +2368,9 @@ time-budget step for how the budget is granted and what it cuts.
 
 ## Cost note
 
-The research providers hit live, paid APIs (AskNews, Exa, Perplexity, OpenRouter
-credits, Google grounding, FRED). Running the bot or a backtest spends real money
+The selected search/data plans (Nimbleway, Tavily, FRED) and optional Google
+URL-context reader may incur charges; configured `:free` OpenRouter model routes
+are zero-priced in the catalog checked 2026-10-02. Running the bot or a backtest spends real money
 and, in live modes, publishes to the platform it forecasts (Metaculus, or
 competitions.mantic.com in `--mode mantic`). Do not launch a paid run without the
 operator's approval; see `AGENTS.md` "Cost discipline". The unit/integration test

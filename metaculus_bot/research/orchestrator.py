@@ -42,6 +42,7 @@ from metaculus_bot.constants import (
     PERPLEXITY_RESEARCH_MODEL_VIA_OPENROUTER,
     PREDICTION_MARKETS_ENABLED_ENV,
     RESOLUTION_SOURCE_ENABLED_ENV,
+    TAVILY_ENABLED_ENV,
     TS_ANCHOR_ENABLED_ENV,
     env_flag_enabled,
 )
@@ -67,6 +68,7 @@ from metaculus_bot.research.providers import (
     is_asknews_subscription_error,
     native_search_provider,
 )
+from metaculus_bot.research.web_search import nimbleway_search_provider, tavily_search_provider
 from metaculus_bot.research.section_format import _demote_inner_headings, assemble_provider_sections
 from metaculus_bot.time_budget import QuestionTimeBudget
 
@@ -232,6 +234,8 @@ class ResearchOrchestrator:
         provider, provider_name = choose_provider_with_name(
             self._default_llm,
             exa_callback=self._call_exa_smart_searcher,
+            nimbleway_callback=nimbleway_search_provider(),
+            tavily_callback=tavily_search_provider(),
             # Each rung gets the vendor its env var pays for. See docs/research.md "Orchestrator implementation notes".
             perplexity_callback=self._call_perplexity_direct,
             openrouter_callback=self._call_perplexity_openrouter,
@@ -266,6 +270,9 @@ class ResearchOrchestrator:
                     "native_search",
                 )
             )
+
+        if not fast_path and primary_name != "tavily" and env_flag_enabled(TAVILY_ENABLED_ENV):
+            providers.append((tavily_search_provider(), "tavily"))
 
         if not fast_path and env_flag_enabled(GEMINI_SEARCH_ENABLED_ENV):
             from metaculus_bot.research.gemini_search import (  # noqa: PLC0415  # HARNESS-SCAN-EXEMPT-function-level-import  # gated google-genai provider

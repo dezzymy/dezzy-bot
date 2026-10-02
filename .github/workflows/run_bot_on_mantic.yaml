@@ -135,6 +135,9 @@ jobs:
           # and the master switch below makes cli fail shut if a future edit re-enables
           # donated routing without also re-adding the secret.
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          NIMBLEWAY_API_KEY: ${{ secrets.NIMBLEWAY_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          RESEARCH_PROVIDER: nimbleway
           DONATED_OPENROUTER_KEY_ENABLED: 'false'
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ASKNEWS_CLIENT_ID: ${{ secrets.ASKNEWS_CLIENT_ID }}
@@ -149,7 +152,8 @@ jobs:
           DISABLE_AIOHTTP_TRANSPORT: 'true'
           # Native search runs in parallel with AskNews; model defaults to
           # openai/gpt-6.1-sol (low effort, verbosity=low, 360s) per constants.py.
-          NATIVE_SEARCH_ENABLED: 'true'
+          NATIVE_SEARCH_ENABLED: 'false'
+          TAVILY_ENABLED: 'true'
           FINANCIAL_DATA_ENABLED: 'true'
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           # SEC EDGAR fair-access contact: the User-Agent the EDGAR client sends. Unset, the
@@ -160,7 +164,7 @@ jobs:
           # in CI as secrets.GEMINI_API_KEY). The grounded-search side has no
           # donated/shared path, because Google AI Studio doesn't offer one.
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_SEARCH_ENABLED: 'true'
+          GEMINI_SEARCH_ENABLED: 'false'
           # OpenRouter Gemini routing (forecaster, stacker, summarizer when the
           # ensemble includes a Google model). The Metaculus workflows set this
           # 'true' so Gemini prefers the donated key; here it is 'false' so every

@@ -172,9 +172,7 @@ class TestCliExitStatus:
 
         with (
             patch("metaculus_bot.fallback_openrouter.build_llm_with_openrouter_fallback", return_value=analyzer),
-            patch(
-                "metaculus_bot.research.targeted.build_native_search_llm",
-            ) as resolver_builder,
+            patch("metaculus_bot.research.targeted.tavily_search", new_callable=AsyncMock) as resolver_search,
             _cli_main_test_mode(
                 alertable_count=0,
                 forecaster_class=forecaster_class,
@@ -195,7 +193,7 @@ class TestCliExitStatus:
         assert bot._research.gap_fill_v1_error_count == 1
         assert bot.alertable_count == 1
         assert analyzer.invoke.await_count == 1
-        resolver_builder.assert_not_called()
+        resolver_search.assert_not_awaited()
         assert events == ["forecast", "report_summary"]
 
     def test_real_v1_empty_analysis_stays_green(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,9 +214,7 @@ class TestCliExitStatus:
 
         with (
             patch("metaculus_bot.fallback_openrouter.build_llm_with_openrouter_fallback", return_value=analyzer),
-            patch(
-                "metaculus_bot.research.targeted.build_native_search_llm",
-            ) as resolver_builder,
+            patch("metaculus_bot.research.targeted.tavily_search", new_callable=AsyncMock) as resolver_search,
             _cli_main_test_mode(alertable_count=0, stub_bot=bot, today=AFTER_RESUME_DATE),
         ):
 
@@ -232,7 +228,7 @@ class TestCliExitStatus:
         assert bot._research.gap_fill_v1_error_count == 0
         assert bot.alertable_count == 0
         assert analyzer.invoke.await_count == 1
-        resolver_builder.assert_not_called()
+        resolver_search.assert_not_awaited()
 
     def test_the_mantic_drop_term_is_absent_when_nothing_was_dropped(self, caplog: pytest.LogCaptureFixture) -> None:
         """Rendered only when it applies, so the registry's optional group and the reader agree."""

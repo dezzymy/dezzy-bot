@@ -32,6 +32,7 @@ from metaculus_bot.constants import (
     ASKNEWS_SECRET_ENV,
     ASKNEWS_WALL_TIMEOUT,
     EXA_API_KEY_ENV,
+    NIMBLEWAY_API_KEY_ENV,
     NATIVE_SEARCH_CONTEXT_SIZE,
     NATIVE_SEARCH_DEFAULT_MODEL,
     NATIVE_SEARCH_MAX_RESULTS,
@@ -48,6 +49,7 @@ from metaculus_bot.constants import (
     PERPLEXITY_RESEARCH_MODEL_VIA_OPENROUTER,
     PERPLEXITY_WALL_TIMEOUT,
     RESEARCH_PROVIDER_ENV,
+    TAVILY_API_KEY_ENV,
 )
 from metaculus_bot.credit_telemetry import llm_call_metadata, plain_llm_key_alias
 from metaculus_bot.fallback_openrouter import build_llm_with_openrouter_fallback
@@ -55,6 +57,7 @@ from metaculus_bot.llm_retry import invoke_with_transient_retry
 from metaculus_bot.prompts import OUTSIDE_VENUE_MARKET_ODDS_POLICY, web_research_prompt
 from metaculus_bot.research.provider_diagnostics import record_provider_detail
 from metaculus_bot.research.raw_log import record_raw_research
+from metaculus_bot.research.web_search import nimbleway_search_provider, tavily_search_provider
 
 ResearchCallable = Callable[[MetaculusQuestion], Awaitable[str]]
 logger = logging.getLogger(__name__)
@@ -548,6 +551,8 @@ def _forced_provider_choice(
     *,
     default_llm: GeneralLlm | None,
     exa_callback: ResearchCallable | None,
+    nimbleway_callback: ResearchCallable | None,
+    tavily_callback: ResearchCallable | None,
     perplexity_callback: ResearchCallable | None,
     openrouter_callback: ResearchCallable | None,
     is_benchmarking: bool,
@@ -558,6 +563,14 @@ def _forced_provider_choice(
         if not (os.getenv(ASKNEWS_CLIENT_ID_ENV) and os.getenv(ASKNEWS_SECRET_ENV)):
             raise ValueError("RESEARCH_PROVIDER=asknews requires ASKNEWS_CLIENT_ID and ASKNEWS_SECRET to be set")
         return _asknews_provider(), "asknews"
+    if forced_lc == "nimbleway":
+        if not os.getenv(NIMBLEWAY_API_KEY_ENV):
+            raise ValueError(f"RESEARCH_PROVIDER=nimbleway requires {NIMBLEWAY_API_KEY_ENV} to be set")
+        return nimbleway_callback or nimbleway_search_provider(), "nimbleway"
+    if forced_lc == "tavily":
+        if not os.getenv(TAVILY_API_KEY_ENV):
+            raise ValueError(f"RESEARCH_PROVIDER=tavily requires {TAVILY_API_KEY_ENV} to be set")
+        return tavily_callback or tavily_search_provider(), "tavily"
     if forced_lc == "exa":
         if exa_callback is not None:
             return exa_callback, "exa"
@@ -580,11 +593,19 @@ def _auto_provider_choice(
     *,
     default_llm: GeneralLlm | None,
     exa_callback: ResearchCallable | None,
+    nimbleway_callback: ResearchCallable | None,
+    tavily_callback: ResearchCallable | None,
     perplexity_callback: ResearchCallable | None,
     openrouter_callback: ResearchCallable | None,
     is_benchmarking: bool,
 ) -> tuple[ResearchCallable, str]:
     """First provider whose credentials are present, in the documented priority order."""
+    if os.getenv(NIMBLEWAY_API_KEY_ENV):
+        return nimbleway_callback or nimbleway_search_provider(), "nimbleway"
+
+    if os.getenv(TAVILY_API_KEY_ENV):
+        return tavily_callback or tavily_search_provider(), "tavily"
+
     if os.getenv(ASKNEWS_CLIENT_ID_ENV) and os.getenv(ASKNEWS_SECRET_ENV):
         return _asknews_provider(), "asknews"
 
@@ -615,18 +636,15 @@ def choose_provider_with_name(
     default_llm: GeneralLlm | None = None,
     *,
     exa_callback: ResearchCallable | None = None,
+    nimbleway_callback: ResearchCallable | None = None,
+    tavily_callback: ResearchCallable | None = None,
     perplexity_callback: ResearchCallable | None = None,
     openrouter_callback: ResearchCallable | None = None,
     is_benchmarking: bool = False,
 ) -> tuple[ResearchCallable, str]:
     """Return a research coroutine and its provider name.
 
-    Priority order replicates pre-refactor behaviour:
-    1. AskNews (ASKNEWS_CLIENT_ID & ASKNEWS_SECRET)
-    2. Exa.ai (EXA_API_KEY)
-    3. Perplexity (PERPLEXITY_API_KEY)
-    4. Perplexity via OpenRouter (OPENROUTER_API_KEY)
-    5. Fallback stub that returns an empty string.
+    Priority order: Nimbleway, Tavily, AskNews, Exa, Perplexity, OpenRouter, then empty.
 
     ``RESEARCH_PROVIDER`` forces a specific provider; an unrecognized value falls
     through to the priority order above.
@@ -637,6 +655,8 @@ def choose_provider_with_name(
             forced.strip().lower(),
             default_llm=default_llm,
             exa_callback=exa_callback,
+            nimbleway_callback=nimbleway_callback,
+            tavily_callback=tavily_callback,
             perplexity_callback=perplexity_callback,
             openrouter_callback=openrouter_callback,
             is_benchmarking=is_benchmarking,
@@ -647,6 +667,8 @@ def choose_provider_with_name(
     return _auto_provider_choice(
         default_llm=default_llm,
         exa_callback=exa_callback,
+        nimbleway_callback=nimbleway_callback,
+        tavily_callback=tavily_callback,
         perplexity_callback=perplexity_callback,
         openrouter_callback=openrouter_callback,
         is_benchmarking=is_benchmarking,

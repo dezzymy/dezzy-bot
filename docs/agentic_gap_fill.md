@@ -17,7 +17,7 @@ orchestrator.
 
 ## Why it exists
 
-The always-on providers (AskNews, native search, Gemini, and so on) build a
+The first-pass providers (Nimbleway, Tavily, and so on) build a
 broad briefing, but they do not read it back and ask "what's missing, and is any
 of this actually wrong?" A step-zero audit found that most of the bot's worst
 misses were not gaps in coverage. They were the panel leaning on a briefing
@@ -120,12 +120,10 @@ characters for the remaining-budget line
 (`GAP_FILL_V2_TOOL_BUDGET_LINE_RESERVE_CHARS`) before truncating the tool body,
 then clips the line to the room available.
 
-- **`search_news`**: recent and historical news via AskNews, using the same
-  rate gate and concurrency semaphore as the primary AskNews provider. Returns a
-  digest of matching articles with dates and URLs.
-- **`search_web`**: semantic web search via Exa (direct SDK, not OpenRouter).
-  Meant for official documents, datasets, reports, and primary sources the
-  driver believes exist. Returns results with URLs and excerpts, which the
+- **`search_news`**: recent and historical news via Nimbleway's news-focused search.
+  Returns matching article titles, descriptions, and URLs.
+- **`search_web`**: general web search via Tavily. Meant for official documents,
+  datasets, reports, and primary sources the driver believes exist. Returns results with URLs and excerpts, which the
   driver is told to follow up with `fetch` since excerpts rarely verify a claim
   on their own. This is the lightest search or document tool, and the one on the
   tightest timeout.
@@ -903,7 +901,7 @@ level up:
 | `agentic/ladder_adapter.py` | One `FetchResult` read as this ladder's own `PlainFetchResult`: the status and method tables, and the message the driver is told for every non-read. |
 | `agentic/local_document.py` | What the free ladder holds for one URL (`HeldDocument`), the passage digest `read_document` serves, the url_context size gate, and the `AGENTIC_FETCH_LOCAL_DOC` marker. The parses themselves are held in `research/document_cache.py`, shared with the ladder's document verdict. |
 | `agentic/fetch_outcomes.py` | This ladder's result type (`PlainFetchResult`), the question-platform self-reference refusal (metaculus.com and `competitions.mantic.com`), and the escalate-to-a-reader outcome. Its per-body-shape builders are dead since the loop moved onto the shared classifier and are deleted with the rest of the loop's own rungs. |
-| `agentic/tool_backends.py` | The outbound half of the tools: the AskNews and Exa clients with their retry ladders and concurrency caps, the Gemini `url_context` document read and its fixed in-thread ceiling, and the markdown formatting of what comes back. |
+| `agentic/tool_backends.py` | Legacy AskNews and Exa clients, the Gemini `url_context` document read and its fixed in-thread ceiling, and legacy markdown formatting. Current web-search tools use `research/web_search.py`. |
 | `agentic/tool_descriptions.py` | The driver-facing tool descriptions and JSON parameter schemas: behavioral text, so a change here changes what the driver does. |
 | `agentic/image_messages.py` | Byte-free image references in archived messages and their multimodal materialization for the next driver request. |
 | `research/source_documents.py`, `research/source_presentation.py` | Bounded local source parsers and caller-time member/sheet selection, inventories, and query digests. |
@@ -936,11 +934,10 @@ Defaults are deliberately not reproduced here. Read them off the definitions in
 | `GAP_FILL_V2_CONCLUDE_THRESHOLD` | Seconds-remaining threshold below which only `conclude` is offered. |
 | `GAP_FILL_V2_MIN_CONTENT_CHARS` | Extracted-char floor below which `fetch` escalates plain HTTP to headless Chromium. |
 
-The driver and reader run on separate credentials. The driver goes through
-litellm/OpenRouter with donated-key-first routing (all eval candidates were
-OpenAI/Anthropic models). The `read_document` reader uses the personal
-`GOOGLE_API_KEY` on the native google-genai SDK, and `search_web` (Exa) and
-`search_news` (AskNews) use their own personal keys.
+The driver and reader run on separate credentials. The driver uses a free
+OpenRouter model through the personal `OPENROUTER_API_KEY`. The `read_document`
+reader uses the personal `GOOGLE_API_KEY` on the native google-genai SDK;
+`search_web` uses `TAVILY_API_KEY` and `search_news` uses `NIMBLEWAY_API_KEY`.
 
 One caveat worth flagging for operators: `GAP_FILL_V2_READER_MODEL`'s default id
 (`gemini-3.8-flash`) was verified live on the native AI Studio SDK 2026-09-03, so

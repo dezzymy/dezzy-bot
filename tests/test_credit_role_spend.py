@@ -799,10 +799,13 @@ class TestProdLlmsAreRoleTagged:
         assert MARKET_RANKER_LLM_CONFIG["role"] == "market_ranker"
         assert MARKET_QUERY_AUTHOR_LLM_CONFIG["role"] == "market_query_author"
 
-    def test_active_openai_model_roles_are_pinned(self) -> None:
-        """Keep every production Sol role on 6.1 while the parser stays on Luna."""
-        assert FORECASTER_LLMS[0].model == "openrouter/openai/gpt-6.1-sol"
-        assert SUMMARIZER_LLM.model == "openrouter/openai/gpt-6.1-sol"
-        assert STACKER_FALLBACK_LLM.model == "openrouter/openai/gpt-6.1-sol"
-        assert DISAGREEMENT_ANALYZER_LLM.model == "openrouter/openai/gpt-6.1-sol"
-        assert PARSER_LLM.model == "openrouter/openai/gpt-6-luna"
+    def test_active_model_roles_use_free_openrouter_routes(self) -> None:
+        assert [llm.model for llm in FORECASTER_LLMS] == [
+            "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+            "openrouter/qwen/qwen3.8-27b:free",
+            "openrouter/google/gemma-4-31b-it:free",
+        ]
+        assert SUMMARIZER_LLM.model.endswith(":free")
+        assert STACKER_FALLBACK_LLM.model.endswith(":free")
+        assert DISAGREEMENT_ANALYZER_LLM.model.endswith(":free")
+        assert PARSER_LLM.model.endswith(":free")

@@ -110,57 +110,40 @@ class TestRunTargetedSearch:
     """Tests for the async run_targeted_search function."""
 
     @pytest.mark.asyncio
-    async def test_calls_grok_and_returns_result(self):
-        mock_llm_instance = AsyncMock()
-        mock_llm_instance.invoke.return_value = "Search results"
+    async def test_searches_tavily_and_formats_results(self):
+        search = AsyncMock(return_value=[{"title": "Source", "url": "https://example.com", "content": "Evidence."}])
 
-        with patch("metaculus_bot.research.targeted.build_native_search_llm", return_value=mock_llm_instance):
+        with patch("metaculus_bot.research.targeted.tavily_search", search):
             result = await run_targeted_search("crux text", "question text")
 
-        assert result == "Search results"
-        mock_llm_instance.invoke.assert_called_once()
+        assert "Evidence." in result
+        assert "https://example.com" in result
+        search.assert_awaited_once_with("crux text\nQuestion: question text")
 
     @pytest.mark.asyncio
     async def test_passes_benchmarking_flag(self):
-        mock_llm_instance = AsyncMock()
-        mock_llm_instance.invoke.return_value = "results"
+        search = AsyncMock(return_value=[])
 
-        with (
-            patch("metaculus_bot.research.targeted.build_native_search_llm", return_value=mock_llm_instance),
-            patch(
-                "metaculus_bot.research.targeted.targeted_search_prompt", wraps=targeted_search_prompt
-            ) as mock_prompt,
-        ):
+        with patch("metaculus_bot.research.targeted.tavily_search", search):
             await run_targeted_search("crux", "q", is_benchmarking=True)
 
-        mock_prompt.assert_called_once_with("crux", "q", is_benchmarking=True)
+        assert search.await_args is not None
+        query = search.await_args.args[0]
+        assert query.startswith("crux\nQuestion: q")
+        assert "benchmarking run" in query
+        assert "prediction-market odds" in query
 
     @pytest.mark.asyncio
     async def test_enforces_wall_clock_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A hung llm.invoke must be bounded by NATIVE_SEARCH_WALL_TIMEOUT.
-
-        run_targeted_search shares the build_native_search_llm config with the
-        native_search research provider, so the same OpenRouter whitespace-drip
-        pathology (2026-05-20 incident) can defeat the per-HTTP-request timeout
-        here too. The asyncio.wait_for wrapper is the wall-clock backstop;
-        this test locks it in so a future refactor can't silently remove it.
-        """
-        # Override the wall-clock cap to a short value via the constants module
-        # (run_targeted_search reads it at import time, but patching the
-        # already-imported reference in targeted_research is what takes effect).
+        """A stalled search request is bounded by the caller's wall timeout."""
         monkeypatch.setattr("metaculus_bot.research.targeted.NATIVE_SEARCH_WALL_TIMEOUT", 0.05)
 
-        class HangingLlm:
-            model = "mock-native-search"
-
-            async def invoke(self, prompt: str) -> str:
-                # Sleep well past the 0.05s wall-clock cap; test passes only if
-                # asyncio.wait_for cancels this before it returns.
-                await asyncio.sleep(5)
-                return "should never reach here"
+        async def hang(_query: str) -> list[dict[str, str]]:
+            await asyncio.sleep(5)
+            return []
 
         with (
-            patch("metaculus_bot.research.targeted.build_native_search_llm", return_value=HangingLlm()),
+            patch("metaculus_bot.research.targeted.tavily_search", side_effect=hang),
             pytest.raises(asyncio.TimeoutError),
         ):
             await run_targeted_search("crux", "question text")

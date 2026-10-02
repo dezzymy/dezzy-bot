@@ -1,10 +1,6 @@
 """Tests for the second-pass gap-fill pipeline in ``targeted_research``.
 
-Mocks ``_run_analyzer`` at the module level and ``build_native_search_llm`` (the
-per-gap resolver now runs OpenAI native web search via OpenRouter). The helper
-``_patch_resolver`` returns an LLM whose ``.invoke`` is the supplied AsyncMock,
-so each test still captures the per-gap prompt and controls the result. No live
-API calls.
+Mocks ``_run_analyzer`` and the Tavily per-gap search. No live API calls.
 """
 
 import asyncio
@@ -92,19 +88,16 @@ def _gap_without(field: str) -> dict[str, Any]:
 
 @contextmanager
 def _patch_resolver(invoke: AsyncMock) -> Iterator[MagicMock]:
-    """Patch ``build_native_search_llm`` so the per-gap resolver uses ``invoke``.
+    """Patch Tavily's async search function and yield its mock for call assertions."""
 
-    The resolver now does ``llm = build_native_search_llm(...); await llm.invoke(prompt)``.
-    Tests historically asserted against the per-gap search AsyncMock directly, so
-    we wrap it in a stub LLM whose ``.invoke`` is that AsyncMock — the prompt is
-    still captured on ``invoke`` exactly as before. Yields the builder mock so
-    callers can assert the model slug / reasoning_effort args.
-    """
-    stub_llm = MagicMock()
-    stub_llm.invoke = invoke
-    builder = MagicMock(return_value=stub_llm)
-    with patch("metaculus_bot.research.targeted.build_native_search_llm", builder):
-        yield builder
+    async def _search(query: str) -> list[dict[str, str]]:
+        result = await invoke(query)
+        if isinstance(result, str):
+            return [{"title": "Test result", "url": "", "content": result}]
+        return result
+
+    with patch("metaculus_bot.research.targeted.tavily_search", side_effect=_search):
+        yield invoke
 
 
 # ---------------------------------------------------------------------------
@@ -808,7 +801,8 @@ async def test_raw_record_carries_the_survivors_and_the_dropped_gaps() -> None:
     rec.assert_called_once()
     payload = rec.call_args.kwargs["payload"]
     assert payload["gaps"] == [kept]
-    assert payload["results"] == ["r2"]
+    assert len(payload["results"]) == 1
+    assert "r2" in payload["results"][0]
     assert payload["dropped"] == [{**dropped, "position": 1, "reason": DROP_NOT_ANSWERABLE}]
 
 
@@ -870,8 +864,8 @@ async def test_analyzer_returns_every_listed_gap_unclipped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolver_prompt_carries_the_resolution_criteria_and_fine_print() -> None:
-    """The per-gap resolver reads the criteria it is asked about. On q44267 it saw only the title,
+async def test_resolver_query_carries_the_resolution_criteria_and_fine_print() -> None:
+    """The per-gap search query includes the resolution context. On q44267 it saw only the title,
     ruled which of two published figures resolved the question from a sister question's wording,
     and every forecaster ratified it (-95.66 spot peer); the analyzer had seen both fields all along."""
     question = MockQuestion(
@@ -888,12 +882,9 @@ async def test_resolver_prompt_carries_the_resolution_criteria_and_fine_print() 
         await run_gap_fill_pass(_q(question), "first-pass research")
 
     assert fake_search.await_args is not None
-    prompt = fake_search.await_args.args[0]
-    assert (
-        "Resolution criteria (what the question actually resolves on):\nResolves as the count detected in the ADIZ."
-        in prompt
-    )
-    assert "Fine print:\nSynced with the original question." in prompt
+    query = fake_search.await_args.args[0]
+    assert "Resolution criteria: Resolves as the count detected in the ADIZ." in query
+    assert "Fine print: Synced with the original question." in query
 
 
 @pytest.mark.asyncio
@@ -971,8 +962,8 @@ async def test_all_searches_fail_returns_empty(caplog: pytest.LogCaptureFixture)
 
 
 @pytest.mark.asyncio
-async def test_benchmarking_flag_threaded_to_analyzer_and_searches() -> None:
-    """is_benchmarking=True: analyzer + each gap search receives the benchmarking warning."""
+async def test_benchmarking_flag_threads_market_warning_to_analyzer_and_searches() -> None:
+    """is_benchmarking=True: analyzer and each web query exclude market odds."""
     question = MockQuestion()
 
     gaps = [
@@ -992,33 +983,18 @@ async def test_benchmarking_flag_threaded_to_analyzer_and_searches() -> None:
     fake_analyzer.assert_awaited_once()
     assert fake_analyzer.call_args.kwargs["is_benchmarking"] is True
 
-    # Each per-gap search prompt includes the benchmarking warning string.
+    # Each per-gap search query carries the benchmarking market-odds restriction.
     for call in fake_search.call_args_list:
-        prompt = call.args[0]
-        assert "benchmarking run" in prompt
+        query = call.args[0]
+        assert "benchmarking run" in query
+        assert "prediction-market odds" in query
 
 
 @pytest.mark.asyncio
-async def test_resolver_builds_native_search_llm_with_sol_low() -> None:
-    """The per-gap resolver runs OpenAI native search on gpt-6.1-sol at low effort.
-
-    Locks the 2026-06-25 migration off direct-Google grounded Gemini: every gap
-    resolution must build a native-search LLM with the GAP_FILL_RESOLVER_MODEL
-    slug (gpt-5.6-terra since the 2026-07-20 sol→terra flip, then gpt-6-sol on the
-    2026-09-22 GPT-6 migration since Terra has no GPT-6 successor, and gpt-6.1-sol on
-    2026-09-29). Effort stays low
-    (Round-2): the resolver was the ~5-min critical-path bottleneck, and low is
-    ~4.5× faster (native_search v3 bench). Pinned to the constant so it stays a
-    canary if either the model or effort changes again.
-    """
-    from metaculus_bot.constants import (
-        GAP_FILL_RESOLVER_MODEL,
-        GAP_FILL_RESOLVER_REASONING_EFFORT,
-    )  # HARNESS-SCAN-EXEMPT-function-level-import  # constants pinned in the one test that asserts them
-
+async def test_resolver_searches_tavily_with_analyzer_query() -> None:
     question = MockQuestion()
     gaps = [_gap("g1", "q1", "wm1")]
-    fake_search = AsyncMock(return_value="resolved")
+    fake_search = AsyncMock(return_value=[{"title": "Resolved", "url": "https://example.com", "content": "evidence"}])
 
     with (
         patch("metaculus_bot.research.targeted._run_analyzer", AsyncMock(return_value=gaps)),
@@ -1026,12 +1002,11 @@ async def test_resolver_builds_native_search_llm_with_sol_low() -> None:
     ):
         out = await run_gap_fill_pass(_q(question), "first-pass research")
 
-    assert "resolved" in out
+    assert "evidence" in out
     builder.assert_called_once()
-    call = builder.call_args
-    model_arg = call.args[0] if call.args else call.kwargs.get("model_slug")
-    assert model_arg == GAP_FILL_RESOLVER_MODEL == "openai/gpt-6.1-sol"
-    assert call.kwargs["reasoning_effort"] == GAP_FILL_RESOLVER_REASONING_EFFORT == "low"
+    query = builder.call_args.args[0]
+    assert query.startswith("q1\nQuestion: Will X happen by 2026?")
+    assert "Resolution criteria: Resolves YES if X happens before Dec 31, 2026." in query
 
 
 @pytest.mark.asyncio

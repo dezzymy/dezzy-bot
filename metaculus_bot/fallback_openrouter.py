@@ -182,6 +182,8 @@ def should_route_via_donated_key(model: str) -> bool:
         return False
     if not model.startswith("openrouter/"):
         return False
+    if model.endswith(":free"):
+        return False
     parts = model.split("/")
     if len(parts) < 2:
         return False

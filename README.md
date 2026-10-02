@@ -17,7 +17,8 @@ each model's reasoning. Originally forked from
 [starter template](https://github.com/Metaculus/metac-bot-template), built on the
 [forecasting-tools](https://github.com/Metaculus/forecasting-tools) framework, and it runs
 unattended from GitHub Actions. 
-Uses Asknews, OpenAI native search, Gemini native search, and a custom agentic gap-fill research pass.
+Uses Nimbleway and Tavily for web research, free OpenRouter models for forecasting and analysis,
+and a custom agentic gap-fill research pass.
 
 ## How it did
 
@@ -45,8 +46,8 @@ Every question goes through the same pipeline, which lives in `metaculus_bot/for
 1. The bot reads the question's close time and grants itself a time budget. With enough time it
    runs everything below. With little time it takes a fast path that drops the slow optional
    research. A question that can't be published before it closes is skipped at intake.
-2. Research runs in parallel. AskNews is the primary news source, and more sources run
-   alongside it: OpenAI's native web search, Google's Gemini grounded search, financial data
+2. Research runs in parallel. Nimbleway is the primary web-search source, with Tavily alongside it,
+   plus financial data
    from yfinance and FRED (the St. Louis Fed's economic data service), and a snapshot of
    prediction-market prices from Polymarket, Kalshi, Manifold and PredictIt. A fetcher reads the
    pages the question names as its resolution source, and a numeric question that maps to a
@@ -85,7 +86,7 @@ cp .env.template .env  # then fill in your credentials
 
 `.env.template` documents every setting. A Metaculus API token is required, and the models run
 through an OpenRouter account. Each research source is off until you set its flag and add its
-credentials (AskNews, Google AI Studio for Gemini search, FRED for financial data), and the
+credentials (Nimbleway, Tavily, Google AI Studio for the optional cited-page reader, FRED for financial data), and the
 production workflows turn all of them on. Run every command through `uv run`, which uses the
 project's own virtual environment, so there's nothing to activate.
 
@@ -98,10 +99,10 @@ make typecheck   # basedpyright
 make format      # ruff format + autofix
 ```
 
-Everything below costs money. A live run calls every model and research source for each new
-question, about $2.60 per question in API credits, and publishes the result to the platform. A
-backtest replays already-resolved questions and scores the bot against the actual outcomes. It
-spends the same credits per question and publishes nothing.
+OpenRouter forecaster and support-model routes use catalog-listed free models. Search API plans,
+financial data, and the optional Google URL-context reader may still incur provider charges. A live
+run also publishes the result to the platform. A backtest replays already-resolved questions and
+scores the bot against the actual outcomes; live research and forecaster calls still require keys.
 
 `--mode tournament`, the default, forecasts the current FutureEval bot tournament.
 `metaculus_cup` forecasts the Metaculus Cup, `minibench` forecasts Metaculus's MiniBench

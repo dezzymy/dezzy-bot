@@ -98,10 +98,10 @@ class TestNativeSearchDefaults:
         role moved to Sol, followed by the 2026-09-29 Sol 6.1 migration)."""
         assert NATIVE_SEARCH_DEFAULT_MODEL == "openai/gpt-6.1-sol"
 
-    def test_gap_fill_sol_defaults_are_gpt_6_1(self) -> None:
-        assert GAP_FILL_ANALYZER_MODEL == "openrouter/openai/gpt-6.1-sol"
+    def test_gap_fill_defaults_use_free_qwen_for_active_roles(self) -> None:
+        assert GAP_FILL_ANALYZER_MODEL == "openrouter/qwen/qwen3.8-27b:free"
         assert GAP_FILL_RESOLVER_MODEL == "openai/gpt-6.1-sol"
-        assert GAP_FILL_V2_DRIVER_MODEL == "openai/gpt-6.1-sol"
+        assert GAP_FILL_V2_DRIVER_MODEL == "qwen/qwen3.8-27b:free"
 
     def test_native_search_reasoning_effort_default_is_low(self):
         """Low effort gives ~4.5× faster wall-clock vs medium on the v3 bench

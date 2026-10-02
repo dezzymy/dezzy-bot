@@ -481,6 +481,8 @@ class TestProviderSelection:
     def test_returns_empty_stub_when_no_providers_configured(self, mock_llm, monkeypatch):
         monkeypatch.delenv("ASKNEWS_CLIENT_ID", raising=False)
         monkeypatch.delenv("ASKNEWS_SECRET", raising=False)
+        monkeypatch.delenv("NIMBLEWAY_API_KEY", raising=False)
+        monkeypatch.delenv("TAVILY_API_KEY", raising=False)
         monkeypatch.delenv("EXA_API_KEY", raising=False)
         monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
@@ -498,6 +500,61 @@ class TestProviderSelection:
         providers = orch._select_research_providers()
         assert len(providers) == 1
         assert providers[0][1] == "none"
+
+    def test_nimbleway_precedes_legacy_primary_providers(self, mock_llm, monkeypatch):
+        monkeypatch.setenv("NIMBLEWAY_API_KEY", "nimble-key")
+        monkeypatch.setenv("TAVILY_API_KEY", "tavily-key")
+        monkeypatch.setenv("ASKNEWS_CLIENT_ID", "asknews-id")
+        monkeypatch.setenv("ASKNEWS_SECRET", "asknews-secret")
+        monkeypatch.delenv("RESEARCH_PROVIDER", raising=False)
+
+        orch = ResearchOrchestrator(default_llm=mock_llm, summarizer_llm=mock_llm)
+
+        _, provider_name = orch._select_research_provider()
+
+        assert provider_name == "nimbleway"
+
+    def test_tavily_runs_as_parallel_addon(self, mock_llm, monkeypatch):
+        monkeypatch.setenv("NIMBLEWAY_API_KEY", "nimble-key")
+        monkeypatch.setenv("TAVILY_API_KEY", "tavily-key")
+        monkeypatch.setenv("TAVILY_ENABLED", "true")
+        monkeypatch.setenv("NATIVE_SEARCH_ENABLED", "false")
+        monkeypatch.setenv("GEMINI_SEARCH_ENABLED", "false")
+        monkeypatch.setenv("FINANCIAL_DATA_ENABLED", "false")
+        monkeypatch.setenv("PREDICTION_MARKETS_ENABLED", "false")
+        monkeypatch.delenv("RESOLUTION_SOURCE_ENABLED", raising=False)
+        monkeypatch.delenv("RESEARCH_PROVIDER", raising=False)
+
+        orch = ResearchOrchestrator(default_llm=mock_llm, summarizer_llm=mock_llm)
+
+        names = [name for _, name in orch._select_research_providers()]
+
+        assert names[:2] == ["nimbleway", "tavily"]
+
+    def test_tavily_primary_is_not_added_twice(self, mock_llm, monkeypatch):
+        for key in (
+            "NIMBLEWAY_API_KEY",
+            "ASKNEWS_CLIENT_ID",
+            "ASKNEWS_SECRET",
+            "EXA_API_KEY",
+            "PERPLEXITY_API_KEY",
+            "OPENROUTER_API_KEY",
+            "RESEARCH_PROVIDER",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TAVILY_API_KEY", "tavily-key")
+        monkeypatch.setenv("TAVILY_ENABLED", "true")
+        monkeypatch.setenv("NATIVE_SEARCH_ENABLED", "false")
+        monkeypatch.setenv("GEMINI_SEARCH_ENABLED", "false")
+        monkeypatch.setenv("FINANCIAL_DATA_ENABLED", "false")
+        monkeypatch.setenv("PREDICTION_MARKETS_ENABLED", "false")
+        monkeypatch.delenv("RESOLUTION_SOURCE_ENABLED", raising=False)
+
+        orch = ResearchOrchestrator(default_llm=mock_llm, summarizer_llm=mock_llm)
+
+        names = [name for _, name in orch._select_research_providers()]
+
+        assert names == ["tavily"]
 
     def test_includes_resolution_source_when_enabled(self, mock_llm, monkeypatch):
         monkeypatch.setenv("RESOLUTION_SOURCE_ENABLED", "true")

@@ -48,6 +48,7 @@ from metaculus_bot.llm_configs import (
     SUMMARIZER_LLM,
 )
 from metaculus_bot.research import gemini_search, prediction_market
+from metaculus_bot.research import web_search
 from metaculus_bot.research import providers as research_providers
 from metaculus_bot.research.agentic import llm as agentic_llm
 from metaculus_bot.research.fetch_ladder import guard
@@ -153,7 +154,7 @@ _CANNED_GAP_ANALYZER = json.dumps(
 )
 
 # Providers that MUST report `ok` in the diagnostics block for these questions.
-_REQUIRED_OK_PROVIDERS = frozenset({"asknews", "native_search", "gemini_search", "resolution_source"})
+_REQUIRED_OK_PROVIDERS = frozenset({"nimbleway", "tavily", "resolution_source"})
 
 
 # ---------------------------------------------------------------------------
@@ -563,6 +564,16 @@ def _install_provider_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     it with a plain lambda would break teardown, while patching the caller leaves the cache intact.
     """
     monkeypatch.setattr(asknews_sdk, "AsyncAskNewsSDK", _FakeAskNewsSDK)
+    search_results = [
+        {
+            "title": "BLS Employment Situation",
+            "url": "https://bls.gov/report",
+            "description": "The unemployment rate was 4.1% in April 2026.",
+            "content": "The unemployment rate was 4.1% in April 2026.",
+        }
+    ]
+    monkeypatch.setattr(web_search, "nimbleway_search", AsyncMock(return_value=search_results))
+    monkeypatch.setattr(web_search, "tavily_search", AsyncMock(return_value=search_results))
 
     # Skip the AskNews provider's real rate-gate sleeps.
     async def _noop_rate_gate() -> None:
@@ -611,14 +622,11 @@ def _install_env(monkeypatch: pytest.MonkeyPatch) -> None:
     fixture sets the *_STACKING_ENABLED flags on; we set them false here to reproduce
     prod, which routes through the non-stacked aggregation.)
 
-    The keys are dummies, each opening one gate: the AskNews creds make AskNews the primary
-    provider (the prod case), GOOGLE_API_KEY opens gemini, FRED_API_KEY opens financial data, and
-    only the personal OpenRouter key is set — the donated one is deleted — so the fallback wrapper
-    stays single-key deterministic and the agentic router runs on one key.
+    Dummy Nimbleway/Tavily credentials select the production search providers. GOOGLE_API_KEY
+    remains for the optional cited-page reader, FRED_API_KEY opens financial data, and only the
+    personal OpenRouter key is set so free model routing stays deterministic.
     """
     for flag in (
-        "NATIVE_SEARCH_ENABLED",
-        "GEMINI_SEARCH_ENABLED",
         "FINANCIAL_DATA_ENABLED",
         "GAP_FILL_ENABLED",
         "GAP_FILL_V2_ENABLED",
@@ -626,11 +634,17 @@ def _install_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "RESOLUTION_SOURCE_ENABLED",
     ):
         monkeypatch.setenv(flag, "true")
+    monkeypatch.setenv("NATIVE_SEARCH_ENABLED", "false")
+    monkeypatch.setenv("GEMINI_SEARCH_ENABLED", "false")
+    monkeypatch.setenv("TAVILY_ENABLED", "true")
     # Restore prod's stacking-disabled default (conftest autouse turns these on).
     for flag in ("BINARY_STACKING_ENABLED", "MC_STACKING_ENABLED", "NUMERIC_STACKING_ENABLED"):
         monkeypatch.setenv(flag, "false")
     monkeypatch.setenv("ASKNEWS_CLIENT_ID", "dummy-client")
     monkeypatch.setenv("ASKNEWS_SECRET", "dummy-secret")
+    monkeypatch.setenv("NIMBLEWAY_API_KEY", "dummy-nimbleway")
+    monkeypatch.setenv("TAVILY_API_KEY", "dummy-tavily")
+    monkeypatch.setenv("RESEARCH_PROVIDER", "nimbleway")
     monkeypatch.setenv("GOOGLE_API_KEY", "dummy-google")
     monkeypatch.setenv("FRED_API_KEY", "dummy-fred")
     monkeypatch.setenv("EXA_API_KEY", "dummy-exa")
